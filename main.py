@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import requests
 import plotly.express as px
+import plotly.graph_objects as go
 
 # 1. 페이지 기본 설정 (넓은 화면 레이아웃)
 st.set_page_config(
@@ -15,7 +16,7 @@ st.set_page_config(
 )
 
 st.title("🗺️ 전국 시군구 고령화 및 인구 변화 분석")
-st.markdown("최신 연도 기준 고령화율과 과거 대비 인구 증감율을 비교 분석합니다.")
+st.markdown("최신 연도 기준 고령화율과 과거 대비 인구 증감율을 구간별로 나누어 비교 분석합니다.")
 
 # 데이터 URL 정의
 POPULATION_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/population_yearly.csv.gz"
@@ -70,13 +71,15 @@ def load_and_process_data():
     df_merged['고령화율'] = (df_merged['현재고령인구'] / df_merged['현재총인구'] * 100).round(2)
     df_merged['인구증감율'] = ((df_merged['현재총인구'] - df_merged['과거총인구']) / df_merged['과거총인구'] * 100).round(2)
     
-    # 고령화율 5단계 구간화
-    bins = [-np.inf, 19.0, 23.0, 28.0, 38.0, np.inf]
-    labels = ['19% 미만', '19% ~ 23% 미만', '23% ~ 28% 미만', '28% ~ 38% 미만', '38% 이상']
-    df_merged['고령화율_구간'] = pd.cut(df_merged['고령화율'], bins=bins, labels=labels, right=False)
+    # [1] 고령화율 5단계 구간화
+    aging_bins = [-np.inf, 19.0, 23.0, 28.0, 38.0, np.inf]
+    aging_labels = ['19% 미만', '19% ~ 23% 미만', '23% ~ 28% 미만', '28% ~ 38% 미만', '38% 이상']
+    df_merged['고령화율_구간'] = pd.cut(df_merged['고령화율'], bins=aging_bins, labels=aging_labels, right=False)
     
-    # 인구 증감 여부를 나타내는 텍스트 열 추가 (마우스 호버용)
-    df_merged['증감상태'] = np.where(df_merged['인구증감율'] >= 0, '증가', '감소')
+    # [2] 인구증감율 5단계 구간화
+    growth_bins = [-np.inf, -10.0, 0.0, 10.0, 20.0, np.inf]
+    growth_labels = ['-10% 미만 (감소 심화)', '-10% ~ 0% 미만 (소폭 감소)', '0% ~ 10% 미만 (소폭 증가)', '10% ~ 20% 미만 (증가)', '20% 이상 (증가 심화)']
+    df_merged['인구증감율_구간'] = pd.cut(df_merged['인구증감율'], bins=growth_bins, labels=growth_labels, right=False)
     
     return df_merged, min_year, max_year
 
@@ -90,10 +93,10 @@ st.caption(f" 기준 기간: {start_year}년 ~ {end_year}년")
 # 4. 지도 나란히 배치 (두 개의 컬럼 생성)
 col_map1, col_map2 = st.columns(2)
 
-# --- 지도 1: 고령화율 (왼쪽) ---
+# --- 지도 1: 고령화율 단계구분도 (왼쪽) ---
 with col_map1:
     st.subheader("🔴 시군구별 고령화율")
-    labels_order = ['19% 미만', '19% ~ 23% 미만', '23% ~ 28% 미만', '28% ~ 38% 미만', '38% 이상']
+    aging_labels_order = ['19% 미만', '19% ~ 23% 미만', '23% ~ 28% 미만', '28% ~ 38% 미만', '38% 이상']
     color_map_aging = {
         '19% 미만': '#fef0d9', '19% ~ 23% 미만': '#fdcc8a', 
         '23% ~ 28% 미만': '#fc8d59', '28% ~ 38% 미만': '#e34a33', '38% 이상': '#b30000'
@@ -105,7 +108,7 @@ with col_map1:
         locations='sigungu_code',
         featureidkey='properties.코드',
         color='고령화율_구간',
-        category_orders={'고령화율_구간': labels_order},
+        category_orders={'고령화율_구간': aging_labels_order},
         color_discrete_map=color_map_aging,
         hover_name='시군구',
         hover_data={'시도': True, '고령화율': ':.2f', 'sigungu_code': False, '고령화율_구간': False},
@@ -115,21 +118,29 @@ with col_map1:
     fig_aging.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=500)
     st.plotly_chart(fig_aging, use_container_width=True)
 
-# --- 지도 2: 인구 증감율 (오른쪽) ---
+# --- 지도 2: 인구증감율 단계구분도 (오른쪽) ---
 with col_map2:
     st.subheader(f"🔵 인구 증감율 ({start_year}년 대비)")
-    # 인구 증감율은 0을 기준으로 감소(빨간색 계열)와 증가(파란색 계열)로 연속적인 색상 표현
+    growth_labels_order = ['-10% 미만 (감소 심화)', '-10% ~ 0% 미만 (소폭 감소)', '0% ~ 10% 미만 (소폭 증가)', '10% ~ 20% 미만 (증가)', '20% 이상 (증가 심화)']
+    color_map_growth = {
+        '-10% 미만 (감소 심화)': '#d7191c',       # 빨강
+        '-10% ~ 0% 미만 (소폭 감소)': '#fdae61',   # 주황
+        '0% ~ 10% 미만 (소폭 증가)': '#abd9e9',    # 연파랑
+        '10% ~ 20% 미만 (증가)': '#2c7bb6',        # 파랑
+        '20% 이상 (증가 심화)': '#053061'          # 짙은 파랑
+    }
+
     fig_growth = px.choropleth(
         df_sigungu,
         geojson=geojson_data,
         locations='sigungu_code',
         featureidkey='properties.코드',
-        color='인구증감율',
-        color_continuous_scale='RdBu',  # Red(감소) -> White(0) -> Blue(증가)
-        color_continuous_midpoint=0,    # 0을 기준으로 색상 분리
+        color='인구증감율_구간',
+        category_orders={'인구증감율_구간': growth_labels_order},
+        color_discrete_map=color_map_growth,
         hover_name='시군구',
-        hover_data={'시도': True, '인구증감율': ':.2f', '증감상태': True, 'sigungu_code': False},
-        labels={'인구증감율': '인구증감율(%)'}
+        hover_data={'시도': True, '인구증감율': ':.2f', 'sigungu_code': False, '인구증감율_구간': False},
+        labels={'인구증감율': '인구증감율(%)', '인구증감율_구간': '인구증감 구간'}
     )
     fig_growth.update_geos(fitbounds="locations", visible=False)
     fig_growth.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=500)
@@ -137,15 +148,25 @@ with col_map2:
 
 st.markdown("---")
 
-# 5. 상관관계 그래프 (산점도)
+# 5. 상관관계 그래프 (산점도 + 선형회귀 선)
 st.subheader("📈 고령화율과 인구 증감율의 상관관계")
-st.markdown("고령화율이 높은 지역일수록 인구가 감소하는 경향이 있는지 그래프로 확인합니다.")
 
+# 결측치를 제거한 뒤에 선형회귀(Numpy polyfit)를 계산합니다.
+df_valid = df_sigungu.dropna(subset=['고령화율', '인구증감율'])
+slope, intercept = np.polyfit(df_valid['고령화율'], df_valid['인구증감율'], 1)
+
+# 회귀방정식 문자열 생성
+sign = "+" if intercept >= 0 else "-"
+equation_text = f"y = {slope:.2f}x {sign} {abs(intercept):.2f}"
+
+st.markdown(f"**선형 회귀 함수(추세선):** `{equation_text}` (x: 고령화율, y: 인구증감율)")
+
+# 기본 산점도 그리기
 fig_scatter = px.scatter(
     df_sigungu,
     x='고령화율',
     y='인구증감율',
-    color='시도',       # 시도별로 색상을 다르게 표현
+    color='시도',       
     hover_name='시군구',
     hover_data={'현재총인구': ':,', '과거총인구': ':,', '시도': False},
     labels={
@@ -156,9 +177,24 @@ fig_scatter = px.scatter(
     opacity=0.7
 )
 
+# 선형회귀 추세선 좌표 계산 (x의 양끝값 사용)
+line_x = np.array([df_valid['고령화율'].min(), df_valid['고령화율'].max()])
+line_y = slope * line_x + intercept
+
+# 산점도 위에 선형회귀선 추가
+fig_scatter.add_trace(
+    go.Scatter(
+        x=line_x, 
+        y=line_y, 
+        mode='lines', 
+        name=f'선형회귀 추세선<br>({equation_text})',
+        line=dict(color='black', width=3, dash='dash')
+    )
+)
+
 # 기준선 추가 (인구 증감율 0% 기준)
-fig_scatter.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="인구 증감 0% 기준선")
-fig_scatter.update_layout(height=500)
+fig_scatter.add_hline(y=0, line_dash="solid", line_color="rgba(255,0,0,0.3)", annotation_text="인구 증감 0% 기준선")
+fig_scatter.update_layout(height=550)
 
 st.plotly_chart(fig_scatter, use_container_width=True)
 
