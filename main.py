@@ -123,11 +123,11 @@ with col_map2:
     st.subheader(f"🔵 인구 증감율 ({start_year}년 대비)")
     growth_labels_order = ['-10% 미만 (감소 심화)', '-10% ~ 0% 미만 (소폭 감소)', '0% ~ 10% 미만 (소폭 증가)', '10% ~ 20% 미만 (증가)', '20% 이상 (증가 심화)']
     color_map_growth = {
-        '-10% 미만 (감소 심화)': '#d7191c',       # 빨강
-        '-10% ~ 0% 미만 (소폭 감소)': '#fdae61',   # 주황
-        '0% ~ 10% 미만 (소폭 증가)': '#abd9e9',    # 연파랑
-        '10% ~ 20% 미만 (증가)': '#2c7bb6',        # 파랑
-        '20% 이상 (증가 심화)': '#053061'          # 짙은 파랑
+        '-10% 미만 (감소 심화)': '#d7191c',       
+        '-10% ~ 0% 미만 (소폭 감소)': '#fdae61',   
+        '0% ~ 10% 미만 (소폭 증가)': '#abd9e9',    
+        '10% ~ 20% 미만 (증가)': '#2c7bb6',        
+        '20% 이상 (증가 심화)': '#053061'          
     }
 
     fig_growth = px.choropleth(
@@ -148,12 +148,21 @@ with col_map2:
 
 st.markdown("---")
 
-# 5. 상관관계 그래프 (산점도 + 선형회귀 선)
+# 5. 상관관계 그래프 (산점도 + 선형회귀 선) - 이상치 제거 적용
 st.subheader("📈 고령화율과 인구 증감율의 상관관계")
 
-# 결측치를 제거한 뒤에 선형회귀(Numpy polyfit)를 계산합니다.
+# 결측치 제거
 df_valid = df_sigungu.dropna(subset=['고령화율', '인구증감율'])
-slope, intercept = np.polyfit(df_valid['고령화율'], df_valid['인구증감율'], 1)
+
+# [수정됨] 인구증감율 60% 이상인 너무 튀는 이상치(Outlier) 제외
+df_filtered = df_valid[df_valid['인구증감율'] < 60]
+outlier_count = len(df_valid) - len(df_filtered)
+
+if outlier_count > 0:
+    st.info(f"💡 분석의 정확도를 높이기 위해 인구 증감율이 60% 이상인 극단적 수치(이상치) **{outlier_count}개** 지역은 상관관계 산점도 및 추세선에서 제외되었습니다.")
+
+# 이상치를 제외한 데이터로 선형회귀(Numpy polyfit)를 계산합니다.
+slope, intercept = np.polyfit(df_filtered['고령화율'], df_filtered['인구증감율'], 1)
 
 # 회귀방정식 문자열 생성
 sign = "+" if intercept >= 0 else "-"
@@ -161,9 +170,9 @@ equation_text = f"y = {slope:.2f}x {sign} {abs(intercept):.2f}"
 
 st.markdown(f"**선형 회귀 함수(추세선):** `{equation_text}` (x: 고령화율, y: 인구증감율)")
 
-# 기본 산점도 그리기
+# 필터링된 데이터(df_filtered)로 산점도 그리기
 fig_scatter = px.scatter(
-    df_sigungu,
+    df_filtered,
     x='고령화율',
     y='인구증감율',
     color='시도',       
@@ -178,7 +187,7 @@ fig_scatter = px.scatter(
 )
 
 # 선형회귀 추세선 좌표 계산 (x의 양끝값 사용)
-line_x = np.array([df_valid['고령화율'].min(), df_valid['고령화율'].max()])
+line_x = np.array([df_filtered['고령화율'].min(), df_filtered['고령화율'].max()])
 line_y = slope * line_x + intercept
 
 # 산점도 위에 선형회귀선 추가
